@@ -111,7 +111,29 @@ class PublicToilet(db.Model):
    toilet_type = db.Column(db.String)
    exec = db.Column(db.String)
    diaper = db.Column(db.String)
-
+class PublicCheckin(db.Model):
+    __tablename__ = 'public_checkins'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    bathroom_id = db.Column(db.String)
+    bathroom_name = db.Column(db.String)
+    bathroom_address = db.Column(db.String)
+    bathroom_type = db.Column(db.String)
+    bathroom_source = db.Column(db.String)
+    latitude = db.Column(db.Float)
+    longitude = db.Column(db.Float)
+    location_name = db.Column(db.String)
+    mood_emoji = db.Column(db.String)
+    bristol_type = db.Column(db.Integer)
+    rating = db.Column(db.Integer)
+    note = db.Column(db.Text)
+    custom_message = db.Column(db.Text)
+    quick_tag = db.Column(db.String)
+    image_url = db.Column(db.String)
+    audio_url = db.Column(db.String)
+    is_anonymous = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class ToiletCheckin(db.Model):
    __tablename__ = 'toilet_checkins'
    toilet_checkin_id = db.Column(db.Integer, primary_key=True)
@@ -125,6 +147,7 @@ class ToiletCheckin(db.Model):
    toilet_rating_amenities = db.Column(db.Integer)
    toilet_review_text = db.Column(db.Text)
    public_toilet_id = db.Column(db.String)
+
 
 # ---------------- Routes ----------------
 
@@ -239,7 +262,89 @@ def delete_user(id):
    db.session.delete(user)
    db.session.commit()
    return jsonify({"success": True, "msg": "使用者已刪除"})
+# ========== PUBLIC CHECKINS ==========
+@app.route('/public-checkins', methods=['GET'])
+def get_public_checkins():
+    checkins = PublicCheckin.query.all()
+    result = []
+    for c in checkins:
+        result.append({
+            'id': c.id,
+            'user_id': c.user_id,
+            'bathroom_id': c.bathroom_id,
+            'bathroom_name': c.bathroom_name,
+            'bathroom_address': c.bathroom_address,
+            'bathroom_type': c.bathroom_type,
+            'bathroom_source': c.bathroom_source,
+            'latitude': c.latitude,
+            'longitude': c.longitude,
+            'location_name': c.location_name,
+            'mood_emoji': c.mood_emoji,
+            'bristol_type': c.bristol_type,
+            'rating': c.rating,
+            'note': c.note,
+            'custom_message': c.custom_message,
+            'quick_tag': c.quick_tag,
+            'image_url': c.image_url,
+            'audio_url': c.audio_url,
+            'is_anonymous': c.is_anonymous,
+            'created_at': c.created_at,
+            'updated_at': c.updated_at
+        })
+    return jsonify(result)
 
+@app.route('/public-checkins/<int:id>', methods=['GET'])
+def get_public_checkin(id):
+    c = PublicCheckin.query.get(id)
+    if not c:
+        return jsonify({"error": "Public checkin not found"}), 404
+    return jsonify({
+        'id': c.id,
+        'user_id': c.user_id,
+        'bathroom_name': c.bathroom_name,
+        'latitude': c.latitude,
+        'longitude': c.longitude,
+        'mood_emoji': c.mood_emoji,
+        'custom_message': c.custom_message,
+        'is_anonymous': c.is_anonymous,
+        'created_at': c.created_at
+    })
+
+@app.route('/public-checkins', methods=['POST'])
+def create_public_checkin():
+    data = request.json
+    checkin = PublicCheckin(
+        user_id=data['user_id'],
+        bathroom_id=data.get('bathroom_id'),
+        bathroom_name=data.get('bathroom_name'),
+        bathroom_address=data.get('bathroom_address'),
+        bathroom_type=data.get('bathroom_type'),
+        bathroom_source=data.get('bathroom_source'),
+        latitude=data['latitude'],
+        longitude=data['longitude'],
+        location_name=data.get('location_name'),
+        mood_emoji=data.get('mood_emoji'),
+        bristol_type=data.get('bristol_type'),
+        rating=data.get('rating'),
+        note=data.get('note'),
+        custom_message=data.get('custom_message'),
+        quick_tag=data.get('quick_tag'),
+        image_url=data.get('image_url'),
+        audio_url=data.get('audio_url'),
+        is_anonymous=data.get('is_anonymous', False)
+    )
+    db.session.add(checkin)
+    db.session.commit()
+    return jsonify({'message': 'Public checkin created successfully', 'id': checkin.id}), 201
+
+@app.route('/public-checkins/<int:id>', methods=['DELETE'])
+def delete_public_checkin(id):
+    checkin = PublicCheckin.query.get(id)
+    if not checkin:
+        return jsonify({"error": "Public checkin not found"}), 404
+    db.session.delete(checkin)
+    db.session.commit()
+    return jsonify({'message': 'Public checkin deleted successfully'})
 # ========== ACHIEVEMENTS ==========
 
 @app.route('/achievements', methods=['GET'])
