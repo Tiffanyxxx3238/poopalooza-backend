@@ -265,86 +265,107 @@ def delete_user(id):
 # ========== PUBLIC CHECKINS ==========
 @app.route('/public-checkins', methods=['GET'])
 def get_public_checkins():
-    checkins = PublicCheckin.query.all()
+    # Get ALL public checkins (from all users)
+    checkins = db.session.execute(text("""
+        SELECT * FROM public_checkins 
+        ORDER BY created_at DESC
+    """)).fetchall()
+    
     result = []
     for c in checkins:
         result.append({
             'id': c.id,
             'user_id': c.user_id,
-            'bathroom_id': c.bathroom_id,
             'bathroom_name': c.bathroom_name,
-            'bathroom_address': c.bathroom_address,
-            'bathroom_type': c.bathroom_type,
-            'bathroom_source': c.bathroom_source,
             'latitude': c.latitude,
             'longitude': c.longitude,
-            'location_name': c.location_name,
             'mood_emoji': c.mood_emoji,
             'bristol_type': c.bristol_type,
-            'rating': c.rating,
-            'note': c.note,
             'custom_message': c.custom_message,
-            'quick_tag': c.quick_tag,
-            'image_url': c.image_url,
-            'audio_url': c.audio_url,
-            'is_anonymous': c.is_anonymous,
             'created_at': c.created_at,
-            'updated_at': c.updated_at
+            'is_anonymous': c.is_anonymous
         })
     return jsonify(result)
-
-@app.route('/public-checkins/<int:id>', methods=['GET'])
-def get_public_checkin(id):
-    c = PublicCheckin.query.get(id)
-    if not c:
-        return jsonify({"error": "Public checkin not found"}), 404
-    return jsonify({
-        'id': c.id,
-        'user_id': c.user_id,
-        'bathroom_name': c.bathroom_name,
-        'latitude': c.latitude,
-        'longitude': c.longitude,
-        'mood_emoji': c.mood_emoji,
-        'custom_message': c.custom_message,
-        'is_anonymous': c.is_anonymous,
-        'created_at': c.created_at
-    })
 
 @app.route('/public-checkins', methods=['POST'])
 def create_public_checkin():
     data = request.json
-    checkin = PublicCheckin(
-        user_id=data['user_id'],
-        bathroom_id=data.get('bathroom_id'),
-        bathroom_name=data.get('bathroom_name'),
-        bathroom_address=data.get('bathroom_address'),
-        bathroom_type=data.get('bathroom_type'),
-        bathroom_source=data.get('bathroom_source'),
-        latitude=data['latitude'],
-        longitude=data['longitude'],
-        location_name=data.get('location_name'),
-        mood_emoji=data.get('mood_emoji'),
-        bristol_type=data.get('bristol_type'),
-        rating=data.get('rating'),
-        note=data.get('note'),
-        custom_message=data.get('custom_message'),
-        quick_tag=data.get('quick_tag'),
-        image_url=data.get('image_url'),
-        audio_url=data.get('audio_url'),
-        is_anonymous=data.get('is_anonymous', False)
-    )
-    db.session.add(checkin)
+    db.session.execute(text("""
+        INSERT INTO public_checkins 
+        (user_id, bathroom_id, bathroom_name, bathroom_address, latitude, longitude, 
+         mood_emoji, bristol_type, rating, custom_message, quick_tag, is_anonymous)
+        VALUES 
+        (:user_id, :bathroom_id, :bathroom_name, :bathroom_address, :latitude, :longitude,
+         :mood_emoji, :bristol_type, :rating, :custom_message, :quick_tag, :is_anonymous)
+    """), {
+        'user_id': data['user_id'],
+        'bathroom_id': data.get('bathroom_id'),
+        'bathroom_name': data.get('bathroom_name'),
+        'bathroom_address': data.get('bathroom_address'),
+        'latitude': data['latitude'],
+        'longitude': data['longitude'],
+        'mood_emoji': data.get('mood_emoji'),
+        'bristol_type': data.get('bristol_type'),
+        'rating': data.get('rating'),
+        'custom_message': data.get('custom_message'),
+        'quick_tag': data.get('quick_tag'),
+        'is_anonymous': data.get('is_anonymous', False)
+    })
     db.session.commit()
-    return jsonify({'message': 'Public checkin created successfully', 'id': checkin.id}), 201
+    return jsonify({'message': 'Public checkin created successfully'}), 201
 
-@app.route('/public-checkins/<int:id>', methods=['DELETE'])
-def delete_public_checkin(id):
-    checkin = PublicCheckin.query.get(id)
-    if not checkin:
-        return jsonify({"error": "Public checkin not found"}), 404
-    db.session.delete(checkin)
+# ========== PRIVATE CHECKINS ==========
+@app.route('/private-checkins', methods=['GET'])
+def get_private_checkins():
+    user_id = request.args.get('user_id', 1)
+    # Get only the user's private checkins
+    checkins = db.session.execute(text("""
+        SELECT * FROM private_checkins 
+        WHERE user_id = :user_id
+        ORDER BY created_at DESC
+    """), {'user_id': user_id}).fetchall()
+    
+    result = []
+    for c in checkins:
+        result.append({
+            'id': c.id,
+            'user_id': c.user_id,
+            'bathroom_name': c.bathroom_name,
+            'latitude': c.latitude,
+            'longitude': c.longitude,
+            'mood_emoji': c.mood_emoji,
+            'bristol_type': c.bristol_type,
+            'custom_message': c.custom_message,
+            'created_at': c.created_at
+        })
+    return jsonify(result)
+
+@app.route('/private-checkins', methods=['POST'])
+def create_private_checkin():
+    data = request.json
+    db.session.execute(text("""
+        INSERT INTO private_checkins 
+        (user_id, bathroom_id, bathroom_name, bathroom_address, latitude, longitude, 
+         mood_emoji, bristol_type, rating, custom_message, quick_tag, personal_notes)
+        VALUES 
+        (:user_id, :bathroom_id, :bathroom_name, :bathroom_address, :latitude, :longitude,
+         :mood_emoji, :bristol_type, :rating, :custom_message, :quick_tag, :personal_notes)
+    """), {
+        'user_id': data['user_id'],
+        'bathroom_id': data.get('bathroom_id'),
+        'bathroom_name': data.get('bathroom_name'),
+        'bathroom_address': data.get('bathroom_address'),
+        'latitude': data['latitude'],
+        'longitude': data['longitude'],
+        'mood_emoji': data.get('mood_emoji'),
+        'bristol_type': data.get('bristol_type'),
+        'rating': data.get('rating'),
+        'custom_message': data.get('custom_message'),
+        'quick_tag': data.get('quick_tag'),
+        'personal_notes': data.get('personal_notes')
+    })
     db.session.commit()
-    return jsonify({'message': 'Public checkin deleted successfully'})
+    return jsonify({'message': 'Private checkin created successfully'}), 201
 # ========== ACHIEVEMENTS ==========
 
 @app.route('/achievements', methods=['GET'])
