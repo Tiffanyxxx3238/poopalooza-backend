@@ -183,26 +183,25 @@ def home():
 def login():
     data = request.json
     
-    # Get username and password from request
     username = data.get('username')
     password = data.get('password')
     
-    # Validate input
     if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
     
-    # Find user by username
     user = User.query.filter_by(username=username).first()
     
     if not user:
         return jsonify({"error": "Invalid username or password"}), 401
     
-    # Check password (for now, simple comparison - should use hashing in production)
-    # For testing, you can temporarily skip password check:
-    # if user.password_hash != password:  # Simple comparison for testing
-    #     return jsonify({"error": "Invalid username or password"}), 401
+    # 驗證密碼（使用雜湊比對）
+    if not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "Invalid username or password"}), 401
     
-    # Return user data
+    # 更新最後登入時間
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+    
     return jsonify({
         "success": True,
         "user_id": user.user_id,
@@ -225,6 +224,198 @@ def get_user(user_id):
         "created_at": user.created_at,
         "consecutive_login_days": user.consecutive_login_days
     })
+# ========== Google OAuth ==========
+@app.route('/oauth/google', methods=['POST'])
+def google_oauth():
+    data = request.json
+    google_id = data.get('googleId')
+    email = data.get('email')
+    name = data.get('name')
+    picture = data.get('picture')
+    
+    if not google_id:
+        return jsonify({"error": "Google ID is required"}), 400
+    
+    try:
+        # 先檢查是否有 google_id 欄位，如果沒有就加入
+        # 這是為了相容現有資料庫
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('users')]
+        
+        if 'google_id' not in columns:
+            db.session.execute(text('ALTER TABLE users ADD COLUMN google_id VARCHAR(255) UNIQUE'))
+            db.session.commit()
+        if 'apple_id' not in columns:
+            db.session.execute(text('ALTER TABLE users ADD COLUMN apple_id VARCHAR(255) UNIQUE'))
+            db.session.commit()
+        if 'provider' not in columns:
+            db.session.execute(text("ALTER TABLE users ADD COLUMN provider VARCHAR(50) DEFAULT 'local'"))
+            db.session.commit()
+        
+        # 查找用戶（用 google_id 或 email）
+        user = db.session.execute(text("""
+            SELECT * FROM users 
+            WHERE google_id = :google_id 
+            OR (email = :email AND email IS NOT NULL)
+            LIMIT 1
+        """), {"google_id": google_id, "email": email}).fetchone()
+        
+        if not user:
+            # 創建新用戶
+            result = db.session.execute(text("""
+                INSERT INTO users (username, email, google_id, password_hash, provider, created_at, last_login, consecutive_login_days, last_login_date)
+                VALUES (:username, :email, :google_id, :password_hash, 'google', :created_at, :last_login, 1, :last_login_date)
+                RETURNING user_id, username, email
+            """), {
+                "username": name or f"user_{google_id[:8]}",
+                "email": email,
+                "google_id": google_id,
+                "password_hash": "oauth_user",  # OAuth 用戶不需要密碼
+                "created_at": datetime.utcnow(),
+                "last_login": datetime.utcnow(),
+                "last_login_date": datetime.utcnow().date()
+            })
+            db.session.commit()
+            user = result.fetchone()
+        else:
+            # 更新最後登入時間
+            db.session.execute(text("""
+                UPDATE users 
+                SET last_login = :last_login 
+                WHERE user_id = :user_id
+            """), {"last_login": datetime.utcnow(), "user_id": user.user_id})
+            db.session.commit()
+        
+        return jsonify({
+            'user_id': user.user_id,
+            'username': user.username,
+            'email': user.email
+        }), 200
+        
+    except Exception as e:
+        print(f"Google OAuth error: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Server error during Google login'}), 500
+
+# ========== Apple OAuth ==========
+@app.route('/oauth/apple', methods=['POST'])
+def apple_oauth():
+    data = request.json
+    apple_id = data.get('appleId')
+    email = data.get('email')
+    full_name = data.get('fullName')
+    
+    if not apple_id:
+        return jsonify({"error": "Apple ID is required"}), 400
+    
+    try:
+        # 確保資料庫有必要的欄位
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('users')]
+        
+        if 'apple_id' not in columns:
+            db.session.execute(text('ALTER TABLE users ADD COLUMN apple_id VARCHAR(255) UNIQUE'))
+            db.session.commit()
+        
+        # 查找用戶
+        user = db.session.execute(text("""
+            SELECT * FROM users 
+            WHERE apple_id = :apple_id
+            LIMIT 1
+        """), {"apple_id": apple_id}).fetchone()
+        
+        if not user:
+            # Apple 可能不提供 email（用戶可以選擇隱藏）
+            username = None
+            if full_name and isinstance(full_name, dict):
+                username = full_name.get('givenName') or full_name.get('familyName')
+            if not username:
+                username = f"Apple_{apple_id[:8]}"
+            
+            # 創建新用戶
+            result = db.session.execute(text("""
+                INSERT INTO users (username, email, apple_id, password_hash, provider, created_at, last_login, consecutive_login_days, last_login_date)
+                VALUES (:username, :email, :apple_id, :password_hash, 'apple', :created_at, :last_login, 1, :last_login_date)
+                RETURNING user_id, username, email
+            """), {
+                "username": username,
+                "email": email,
+                "apple_id": apple_id,
+                "password_hash": "oauth_user",
+                "created_at": datetime.utcnow(),
+                "last_login": datetime.utcnow(),
+                "last_login_date": datetime.utcnow().date()
+            })
+            db.session.commit()
+            user = result.fetchone()
+        else:
+            # 更新最後登入時間
+            db.session.execute(text("""
+                UPDATE users 
+                SET last_login = :last_login 
+                WHERE user_id = :user_id
+            """), {"last_login": datetime.utcnow(), "user_id": user.user_id})
+            db.session.commit()
+        
+        return jsonify({
+            'user_id': user.user_id,
+            'username': user.username,
+            'email': user.email
+        }), 200
+        
+    except Exception as e:
+        print(f"Apple OAuth error: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Server error during Apple login'}), 500
+# ========== 註冊功能 ==========
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.json
+    
+    # 驗證必填欄位
+    username = data.get('username')
+    password = data.get('password')
+    email = data.get('email')
+    
+    if not username or not password:
+        return jsonify({"error": "Username and password are required"}), 400
+    
+    # 檢查用戶名是否已存在
+    existing_user = User.query.filter_by(username=username).first()
+    if existing_user:
+        return jsonify({"error": "Username already exists"}), 409
+    
+    # 如果有 email，檢查是否已存在
+    if email:
+        existing_email = User.query.filter_by(email=email).first()
+        if existing_email:
+            return jsonify({"error": "Email already exists"}), 409
+    
+    # 創建新用戶（密碼要雜湊）
+    new_user = User(
+        username=username,
+        email=email,
+        password_hash=generate_password_hash(password),  # 密碼雜湊
+        created_at=datetime.utcnow(),
+        last_login=datetime.utcnow(),
+        consecutive_login_days=1,
+        last_login_date=datetime.utcnow().date()
+    )
+    
+    db.session.add(new_user)
+    db.session.commit()
+    
+    return jsonify({
+        "success": True,
+        "user_id": new_user.user_id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "message": "Registration successful"
+    }), 201
+
+
 # ========== USERS ==========
 
 @app.route('/users', methods=['GET'])
