@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from sqlalchemy import text
 from werkzeug.security import check_password_hash, generate_password_hash
+import re
 
 load_dotenv()
 
@@ -374,13 +375,41 @@ def apple_oauth():
 def register():
     data = request.json
     
-    # 驗證必填欄位
     username = data.get('username')
     password = data.get('password')
     email = data.get('email')
     
+    # 驗證必填欄位
     if not username or not password:
         return jsonify({"error": "Username and password are required"}), 400
+    
+    # 驗證用戶名長度
+    if len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters"}), 400
+    
+    # 驗證密碼強度
+    password_errors = []
+    if len(password) < 8:
+        password_errors.append("at least 8 characters")
+    if not re.search(r'[A-Z]', password):
+        password_errors.append("one uppercase letter")
+    if not re.search(r'[a-z]', password):
+        password_errors.append("one lowercase letter")
+    if not re.search(r'[0-9]', password):
+        password_errors.append("one number")
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        password_errors.append("one special character")
+    
+    if password_errors:
+        return jsonify({
+            "error": f"Password must contain: {', '.join(password_errors)}"
+        }), 400
+    
+    # 驗證 email 格式（如果有提供）
+    if email:
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, email):
+            return jsonify({"error": "Invalid email format"}), 400
     
     # 檢查用戶名是否已存在
     existing_user = User.query.filter_by(username=username).first()
